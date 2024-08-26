@@ -3,7 +3,7 @@ module github.com/gflydev/console
 go 1.22.6
 
 require (
-	github.com/gflydev/core v1.9.0
+	github.com/gflydev/core v1.10.1
 	github.com/hibiken/asynq v0.24.1
 	github.com/robfig/cron/v3 v3.0.1
 )
