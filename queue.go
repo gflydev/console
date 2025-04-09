@@ -26,7 +26,7 @@ type ITask interface {
 type Task struct{}
 
 func (t Task) Dequeue(ctx context.Context, task *asynq.Task) error {
-	return errors.NotYetImplemented
+	return errors.NotImplemented
 }
 
 // ===========================================================================================================
