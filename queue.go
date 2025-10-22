@@ -12,26 +12,65 @@ import (
 	"time"
 )
 
-// ===========================================================================================================
-// 												Queue task
-// ===========================================================================================================
+// ===========================================================================
+//                                Task Payload
+// ===========================================================================
+
+// TaskPayload wraps asynq.Task and provides helper methods for easier task handling.
+type TaskPayload struct {
+	// task is the underlying asynq task
+	task *asynq.Task
+}
+
+// NewCustomTask creates a new TaskPayload wrapper around asynq.Task.
+func NewCustomTask(task *asynq.Task) *TaskPayload {
+	return &TaskPayload{task: task}
+}
+
+// BindPayload unmarshals the JSON payload into the provided struct.
+// Example: task.GetPayload(&myStruct)
+func (ct *TaskPayload) BindPayload(v interface{}) error {
+	return json.Unmarshal(ct.task.Payload(), v)
+}
+
+// GetPayload returns the raw payload bytes.
+func (ct *TaskPayload) GetPayload() []byte {
+	return ct.task.Payload()
+}
+
+// GetType returns the task type/name.
+func (ct *TaskPayload) GetType() string {
+	return ct.task.Type()
+}
+
+// GetResultWriter returns the result writer for storing task results.
+// Can be used to write results that will be returned to the client.
+func (ct *TaskPayload) GetResultWriter() *asynq.ResultWriter {
+	return ct.task.ResultWriter()
+}
+
+// ===========================================================================
+//                                Queue task
+// ===========================================================================
 
 // ITask The interface task.
 type ITask interface {
 	// Dequeue get out and process task in queue.
-	Dequeue(ctx context.Context, t *asynq.Task) error
+	Dequeue(task *TaskPayload) error
 }
 
 // Task Abstract task.
 type Task struct{}
 
-func (t Task) Dequeue(ctx context.Context, task *asynq.Task) error {
+func (t Task) Dequeue(task *TaskPayload) error {
+	task.task = nil
+
 	return errors.NotImplemented
 }
 
-// ===========================================================================================================
-// 											Queue handler
-// ===========================================================================================================
+// ===========================================================================
+//                                Queue handler
+// ===========================================================================
 
 func getRedisClientOpt() asynq.RedisClientOpt {
 	// Build Redis connection URL.
@@ -52,6 +91,17 @@ func getRedisClientOpt() asynq.RedisClientOpt {
 }
 
 var client = asynq.NewClient(getRedisClientOpt())
+
+// createTaskHandler creates an adapter function that converts asynq.Task to TaskPayload.
+// This allows the ITask interface to work with TaskPayload while asynq expects *asynq.Task.
+func createTaskHandler(task ITask) func(context.Context, *asynq.Task) error {
+	return func(ctx context.Context, asynqTask *asynq.Task) error {
+		// Wrap asynq.Task in TaskPayload
+		customTask := NewCustomTask(asynqTask)
+		// Call the task's Dequeue method with TaskPayload
+		return task.Dequeue(customTask)
+	}
+}
 
 // StartQueueWorker Start queue worker.
 // Worker handles a Task(job) was pushed to Queue (Redis) from somewhere.
@@ -78,8 +128,9 @@ func StartQueueWorker() {
 
 	// Register task handlers
 	for key, task := range queueTasks {
-		// Register a task handler
-		mux.HandleFunc(key, task.Dequeue)
+		// Create adapter to convert asynq.Task to TaskPayload
+		handler := createTaskHandler(task)
+		mux.HandleFunc(key, handler)
 		log.Infof("Init queue task %s", key)
 	}
 
