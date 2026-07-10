@@ -63,8 +63,6 @@ type ITask interface {
 type Task struct{}
 
 func (t Task) Dequeue(task *TaskPayload) error {
-	task.task = nil
-
 	return errors.NotImplemented
 }
 
@@ -90,7 +88,30 @@ func getRedisClientOpt() asynq.RedisClientOpt {
 	}
 }
 
-var client = asynq.NewClient(getRedisClientOpt())
+var (
+	client     *asynq.Client
+	clientOnce sync.Once
+)
+
+// getClient lazily builds the shared asynq client on first use so that the
+// Redis options are read after the application has loaded its environment
+// (e.g. from a .env file), not at package-import time.
+func getClient() *asynq.Client {
+	clientOnce.Do(func() {
+		client = asynq.NewClient(getRedisClientOpt())
+	})
+	return client
+}
+
+// CloseClient releases the shared asynq client and its Redis connections.
+// Call it on application shutdown. Safe to call even if the client was never
+// used.
+func CloseClient() error {
+	if client == nil {
+		return nil
+	}
+	return client.Close()
+}
 
 // createTaskHandler creates an adapter function that converts asynq.Task to TaskPayload.
 // This allows the ITask interface to work with TaskPayload while asynq expects *asynq.Task.
@@ -151,18 +172,10 @@ func RegisterTask(task ITask, name string) {
 // DispatchTask push a task to queue.
 func DispatchTask(data interface{}, name string) {
 	startTime := time.Now()
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
 
-		err := handleEnqueue(data, name)
-		if err != nil {
-			log.Errorf("Error %v", err)
-		}
-	}()
-
-	wg.Wait()
+	if err := handleEnqueue(data, name); err != nil {
+		log.Errorf("Error %v", err)
+	}
 
 	log.Infof("[RUN] Dispatch Task %s - %v", name, time.Since(startTime))
 }
@@ -188,7 +201,7 @@ func handleEnqueue(data interface{}, name string) error {
 	task := asynq.NewTask(name, payload)
 
 	// Enqueue task
-	info, err := client.Enqueue(task)
+	info, err := getClient().Enqueue(task)
 	if err != nil {
 		log.Errorf("Could not enqueue task: %v", err)
 

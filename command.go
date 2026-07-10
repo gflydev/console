@@ -37,6 +37,11 @@ type CommandParameter map[string]interface{}
 // Command pool
 var commands = make(map[string]ICommand)
 
+// paramPattern matches a single `--key=value` argument.
+// Compiled once at package load instead of on every argument.
+// Parameter pattern `--age=41 --name=John --email="John Land<john@mail.com>" --married=true`
+var paramPattern = regexp.MustCompile(`--(\w+)=([\w*\s+"'<>@./#&-]*)`)
+
 // RegisterCommand add a new command to pool.
 func RegisterCommand(cmd ICommand, name ...string) {
 	cmdName := utils.ReflectType(cmd)[1:]
@@ -49,6 +54,11 @@ func RegisterCommand(cmd ICommand, name ...string) {
 }
 
 func RunCommands(args []string) {
+	if len(args) == 0 {
+		log.Info("No command name provided")
+		return
+	}
+
 	cmdName := args[0]
 	cmd, ok := commands[cmdName]
 
@@ -57,11 +67,14 @@ func RunCommands(args []string) {
 		return
 	}
 
-	// Parameter pattern `--age=41 --name=John --email="John Land<john@mail.com>" --married=true`
+	// Parse `--key=value` arguments, skipping anything that doesn't match.
 	var parameters = CommandParameter{}
 	for _, param := range args[1:] {
-		re := regexp.MustCompile(`--(\w+)=([\w*\s+"'<>@./#&-]*)`)
-		matches := re.FindStringSubmatch(param)
+		matches := paramPattern.FindStringSubmatch(param)
+		if matches == nil {
+			log.Infof("Ignoring malformed parameter `%s`", param)
+			continue
+		}
 
 		parameters[matches[1]] = matches[2]
 	}
