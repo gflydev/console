@@ -27,7 +27,11 @@ func StartScheduler() {
 	for _, job := range jobs {
 		_, err := c.AddFunc(job.GetTime(), job.Handle)
 		if err != nil {
-			return
+			// Skip the faulty job (e.g. invalid cron spec) but keep
+			// registering the rest instead of aborting the scheduler.
+			log.Errorf("Could not register job %s with spec %q: %v",
+				utils.ReflectType(job), job.GetTime(), err)
+			continue
 		}
 		log.Infof("Init schedule job %s", utils.ReflectType(job))
 	}
